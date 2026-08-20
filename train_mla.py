@@ -50,7 +50,10 @@ bias = False # do we use bias inside LayerNorm and Linear layers?
 # MLA (Multi-head Latent Attention) settings -- see model_mla.py
 kv_lora_rank = 512   # low-rank dim shared by K and V; 0 = fall back to vanilla MHA
 q_lora_rank = 0      # low-rank dim for Q compression; 0 = direct Q projection
-qk_rope_head_dim = 0 # per-head dim that receives RoPE; 0 = rotate the whole head
+qk_rope_head_dim = 16 # per-head dim that receives RoPE. >0 enables DeepSeek's decoupled
+                      # RoPE (separate W_KR, shared single head) which is what makes the
+                      # absorbed decode path possible. 0 = legacy: rotate the whole head.
+v_head_dim = 0       # per-head dim of V; 0 = same as the q/k head dim
 use_rope = True      # use RoPE instead of learned absolute position embeddings
 rope_theta = 10000.0 # RoPE base frequency
 # adamw optimizer
@@ -146,7 +149,8 @@ if os.path.exists(meta_path):
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=None, dropout=dropout,
                   kv_lora_rank=kv_lora_rank, q_lora_rank=q_lora_rank,
-                  qk_rope_head_dim=qk_rope_head_dim, use_rope=use_rope,
+                  qk_rope_head_dim=qk_rope_head_dim, v_head_dim=v_head_dim,
+                  use_rope=use_rope,
                   rope_theta=rope_theta) # start with model_args from command line
 if init_from == 'scratch':
     # init a new model from scratch
@@ -168,7 +172,7 @@ elif init_from == 'resume':
     for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
         model_args[k] = checkpoint_model_args[k]
     # MLA-specific keys: only present in model_mla checkpoints, so guard with `in`
-    for k in ['kv_lora_rank', 'q_lora_rank', 'qk_rope_head_dim', 'use_rope', 'rope_theta']:
+    for k in ['kv_lora_rank', 'q_lora_rank', 'qk_rope_head_dim', 'v_head_dim', 'use_rope', 'rope_theta']:
         if k in checkpoint_model_args:
             model_args[k] = checkpoint_model_args[k]
     # create the model

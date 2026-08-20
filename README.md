@@ -3,6 +3,51 @@
 
 ![nanoGPT](assets/nanogpt.jpg)
 
+---
+
+## About this fork (nanoGPT_plus)
+
+A fork of [karpathy/nanoGPT](https://github.com/karpathy/nanoGPT) used to learn the
+DeepSeek architecture stack by re-implementing it, one piece at a time, on top of a
+codebase small enough to hold in your head. The upstream files are untouched so that
+every change can be diffed against a working reference.
+
+**Done: MLA (Multi-head Latent Attention), DeepSeek-V2 style.**
+
+| file | what it is |
+|---|---|
+| [`model_mla.py`](model_mla.py) | GPT with MLA: low-rank shared K/V latent, decoupled RoPE, optional `v_head_dim`, a real KV cache, and an absorbed decode path that never materialises K or V |
+| [`train_mla.py`](train_mla.py) / [`sample_mla.py`](sample_mla.py) / [`bench_mla.py`](bench_mla.py) | the training / sampling / benchmark scripts, pointed at `model_mla.py` |
+| [`test_mla.py`](test_mla.py) | equivalence tests — 7 configs × 5 assertions |
+| [`bench_kv_cache.py`](bench_kv_cache.py) | measures what MLA actually buys: cache footprint and decode speed |
+| [`mla_min.py`](mla_min.py) | a standalone ~160-line MLA reference, readable on its own |
+
+Measured on the shakespeare-char checkpoint (CPU, 6 layers, `n_embd=384`, `kv_lora_rank=128`):
+
+```
+KV cache        768 vs 4608 numbers/token   ->  6.00x smaller than MHA
+decode 200 tok  1296 ms -> 333 ms           ->  3.89x faster
+with absorption (decoupled RoPE config)     ->  6.16x faster than no cache
+```
+
+The KV cache and the absorbed path are *pure optimisations*, so they are verified by
+asserting they reproduce the slow path exactly, not by looking at loss curves.
+
+### docs
+
+| | |
+|---|---|
+| [`docs/mla_deep_dive.md`](docs/mla_deep_dive.md) | MLA 深度解析：KV cache 的本质、MHA/MQA/GQA、FlashAttention、RoPE |
+| [`docs/inference_path.md`](docs/inference_path.md) | 推理路径是什么、什么是恒等变换、从 0 做模型的清单 |
+| [`docs/experiments.md`](docs/experiments.md) | 实验记录：MLA vs baseline，KV cache 实测 |
+| [`docs/moe_pitfalls.md`](docs/moe_pitfalls.md) | MoE 落地踩坑清单（DDP / MFU / 优化器分组） |
+
+**Next: MTP, then MoE.**
+
+Everything below is the original nanoGPT README.
+
+---
+
 
 ---
 

@@ -22,6 +22,8 @@ top_k = 200 # retain only the top_k most likely tokens, clamp others to have 0 p
 seed = 1337
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', etc.
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32' or 'bfloat16' or 'float16'
+use_cache = True # KV-cache decoding (prefill + one token at a time). Mathematically
+                 # identical to use_cache=False; see test_mla.py
 compile = False # use PyTorch 2.0 to compile the model to be faster
 exec(open('configurator.py').read()) # overrides from command line or config file
 # -----------------------------------------------------------------------------
@@ -90,6 +92,9 @@ x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 with torch.no_grad():
     with ctx:
         for k in range(num_samples):
-            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+            # generate() resets the KV cache itself, so successive samples cannot
+            # contaminate each other with the previous sample's history
+            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k,
+                               use_cache=use_cache)
             print(decode(y[0].tolist()))
             print('---------------')

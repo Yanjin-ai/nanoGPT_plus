@@ -26,11 +26,16 @@ n_embd = 384
 dropout = 0.2
 
 # ---- MLA settings ----
-# n_embd=384, n_head=6 -> head_dim=64; qk_rope_head_dim=0 rotates the full 64 dims.
-kv_lora_rank = 128   # compressed K/V latent dim (KV cache shrinks from 2*384=768 to 128)
-q_lora_rank = 0      # keep direct Q projection for this tiny model
-qk_rope_head_dim = 0 # 0 = RoPE on the whole head
-use_rope = True      # RoPE instead of learned wpe
+# n_embd=384, n_head=6 -> head_dim=64, split as 48 nope + 16 rope.
+kv_lora_rank = 128    # compressed K/V latent dim. KV cache per token per layer drops from
+                      # 2*384=768 numbers (MHA) to 128+16=144 -> 5.33x
+q_lora_rank = 0       # keep direct Q projection for this tiny model
+qk_rope_head_dim = 16 # DeepSeek decoupled RoPE: k_R gets its own W_KR (one head shared by
+                      # all heads) and is cached beside c_kv. The remaining 48 nope dims are
+                      # absorbable, which is what the absorbed decode path needs.
+                      # Set to 0 for the legacy layout (whole head rotated, no absorption).
+v_head_dim = 0        # 0 = same as the q/k head dim (64)
+use_rope = True       # RoPE instead of learned wpe
 rope_theta = 10000.0
 
 learning_rate = 1e-3 # with baby networks can afford to go a bit higher
