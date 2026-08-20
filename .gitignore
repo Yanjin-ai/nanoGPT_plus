@@ -10,3 +10,11 @@ __pycache__/
 input.txt
 env/
 venv/
+# macOS AppleDouble sidecars (exFAT/FAT volumes)
+._*
+
+# virtualenvs
+.venv/
+
+# checkpoints / run dirs (training logs ARE tracked: they are the experiment record)
+out-*/
