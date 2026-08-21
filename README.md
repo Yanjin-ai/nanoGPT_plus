@@ -37,6 +37,7 @@ asserting they reproduce the slow path exactly, not by looking at loss curves.
 
 | | |
 |---|---|
+| [`docs/case_study_mla.md`](docs/case_study_mla.md) | **完整技术学习案例：在 nanoGPT 上从零实现 MLA**（推荐入口） |
 | [`docs/mla_deep_dive.md`](docs/mla_deep_dive.md) | MLA 深度解析：KV cache 的本质、MHA/MQA/GQA、FlashAttention、RoPE |
 | [`docs/inference_path.md`](docs/inference_path.md) | 推理路径是什么、什么是恒等变换、从 0 做模型的清单 |
 | [`docs/experiments.md`](docs/experiments.md) | 实验记录：MLA vs baseline，KV cache 实测 |
