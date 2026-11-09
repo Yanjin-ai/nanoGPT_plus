@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>在 nanoGPT 上把 MHA 换成 MLA：核心理念、改动清单，和那些不报错的坑</title>
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --bg-card: #ffffff;
+    --bg-code: #0f172a;
+    --bg-soft: #eef1f8;
+    --text: #1e293b;
+    --text-2: #475569;
+    --text-3: #94a3b8;
+    --border: #e2e8f0;
+    --accent: #4f46e5;
+    --accent-2: #7c3aed;
+    --accent-soft: #eef2ff;
+    --warn: #d97706;
+    --warn-bg: #fffbeb;
+    --good: #059669;
+    --good-bg: #ecfdf5;
+    --tok-c: #64748b;
+    --tok-s: #a5b4fc;
+    --tok-k: #f472b6;
+    --shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.06);
+    --shadow-lg: 0 20px 60px rgba(15,23,42,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1120;
+      --bg-card: #111a2e;
+      --bg-soft: #16213a;
+      --text: #e2e8f0;
+      --text-2: #aab6cd;
+      --text-3: #64748b;
+      --border: #1e293b;
+      --accent-soft: #1e1b4b;
+      --warn-bg: #2a1d0b;
+      --good-bg: #0b2e24;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+      --shadow-lg: 0 20px 60px rgba(0,0,0,.5);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+                 "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ---------- progress bar ---------- */
+  #progress {
+    position: fixed; top: 0; left: 0; height: 3px; width: 0;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    z-index: 100; transition: width .08s linear;
+  }
+
+  /* ---------- hero ---------- */
+  header {
+    background:
+      radial-gradient(1200px 500px at 85% -10%, rgba(124,58,237,.18), transparent 60%),
+      radial-gradient(900px 420px at 10% -20%, rgba(79,70,229,.16), transparent 55%),
+      var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 72px 24px 48px;
+  }
+  .hero-inner { max-width: 900px; margin: 0 auto; }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--accent);
+    background: var(--accent-soft); padding: 6px 14px; border-radius: 999px;
+    margin-bottom: 20px;
+  }
+  .kicker .dot { width: 8px; height: 8px; border-radius: 50%; background: linear-gradient(135deg,var(--accent),var(--accent-2)); }
+  h1 {
+    font-size: clamp(28px, 4.6vw, 44px);
+    line-height: 1.22; margin: 0 0 18px; letter-spacing: -.01em;
+    background: linear-gradient(100deg, var(--text) 20%, var(--accent) 90%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .subtitle { font-size: 17px; color: var(--text-2); max-width: 760px; margin: 0 0 22px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tag {
+    font-size: 12.5px; color: var(--text-2); border: 1px solid var(--border);
+    padding: 3px 11px; border-radius: 999px; background: var(--bg-card);
+  }
+
+  /* ---------- layout ---------- */
+  .layout {
+    max-width: 1180px; margin: 0 auto; padding: 40px 24px 80px;
+    display: grid; grid-template-columns: 260px minmax(0,1fr); gap: 48px; align-items: start;
+  }
+  @media (max-width: 1000px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.toc { position: static !important; }
+  }
+
+  /* ---------- toc ---------- */
+  nav.toc {
+    position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow: auto;
+    font-size: 14px; padding-right: 6px;
+  }
+  nav.toc .toc-title {
+    font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--text-3); margin: 0 0 12px 4px;
+  }
+  nav.toc ul { list-style: none; margin: 0; padding: 0; }
+  nav.toc li { margin: 2px 0; }
+  nav.toc a {
+    display: block; padding: 5px 10px; border-radius: 8px; color: var(--text-2);
+    border-left: 2px solid transparent; transition: all .15s;
+  }
+  nav.toc a:hover { color: var(--text); background: var(--bg-soft); text-decoration: none; }
+  nav.toc a.active { color: var(--accent); background: var(--accent-soft); border-left-color: var(--accent); font-weight: 600; }
+  nav.toc li ul { margin-left: 12px; }
+  nav.toc li ul a { font-size: 13px; padding: 3px 10px; color: var(--text-3); }
+  nav.toc li ul a.active { color: var(--accent); }
+
+  /* ---------- article ---------- */
+  article { min-width: 0; }
+  section { margin-bottom: 56px; }
+  h2 {
+    font-size: 26px; line-height: 1.3; margin: 0 0 6px; letter-spacing: -.01em;
+    padding-top: 8px;
+  }
+  h2 .sec-no {
+    display: inline-block; margin-right: 10px;
+    font-size: 15px; vertical-align: 4px; padding: 1px 9px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff;
+    font-weight: 700; letter-spacing: 0;
+  }
+  h3 { font-size: 19px; margin: 34px 0 10px; letter-spacing: -.01em; }
+  h3 .sub-no { color: var(--accent); font-weight: 700; margin-right: 8px; }
+  p { margin: 12px 0; }
+  strong { font-weight: 650; }
+  em { font-style: normal; }
+
+  /* ---------- inline code / math ---------- */
+  code {
+    font-family: "SFMono-Regular", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: .88em;
+    background: var(--bg-soft); color: var(--accent);
+    padding: 2px 6px; border-radius: 6px;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+  .math { font-family: Georgia, "Times New Roman", serif; font-style: italic; }
+  sub, sup { font-size: .72em; }
+  sub { vertical-align: sub; }
+  sup { vertical-align: super; }
+
+  /* ---------- code blocks ---------- */
+  pre {
+    margin: 16px 0; padding: 16px 18px; border-radius: 12px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.6;
+  }
+  pre.code {
+    background: var(--bg-code); color: #e2e8f0;
+    box-shadow: var(--shadow); border: 1px solid rgba(255,255,255,.05);
+  }
+  pre.code code { color: #e2e8f0; }
+  pre.ascii {
+    background: var(--bg-soft); color: var(--text);
+    border: 1px solid var(--border);
+    white-space: pre; line-height: 1.5;
+  }
+  .tk-c { color: #7d8ea3; font-style: italic; }
+  .tk-s { color: #a5b4fc; }
+  .tk-k { color: #f472b6; }
+
+  /* ---------- tables ---------- */
+  .table-wrap { overflow-x: auto; margin: 18px 0; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-card); box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  thead th {
+    background: var(--bg-soft); font-weight: 650; color: var(--text);
+    white-space: nowrap; font-size: 13px; letter-spacing: .02em;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--bg-soft); }
+  td code, th code { white-space: nowrap; }
+
+  /* ---------- blockquote ---------- */
+  blockquote {
+    margin: 18px 0; padding: 14px 20px;
+    background: var(--accent-soft);
+    border-left: 4px solid var(--accent);
+    border-radius: 0 12px 12px 0; color: var(--text-2);
+  }
+  blockquote p { margin: 6px 0; }
+  blockquote strong { color: var(--text); }
+
+  /* ---------- pitfall cards ---------- */
+  .pitfall {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-left: 4px solid var(--warn); border-radius: 14px;
+    padding: 20px 22px; margin: 20px 0; box-shadow: var(--shadow);
+  }
+  .pitfall .pit-head {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 8px;
+  }
+  .pit-badge {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 9px; font-weight: 700; font-size: 14px;
+    background: var(--warn-bg); color: var(--warn);
+  }
+  .pitfall h4 { margin: 0; font-size: 17px; }
+  .pitfall p { margin: 8px 0; color: var(--text-2); }
+  .pitfall p strong { color: var(--text); }
+  .pitfall code { color: var(--warn); }
+
+  /* ---------- callout ---------- */
+  .callout {
+    margin: 20px 0; padding: 16px 20px; border-radius: 14px;
+    background: var(--good-bg); border: 1px solid rgba(5,150,105,.25); color: var(--text-2);
+  }
+  .callout strong { color: var(--good); }
+  .callout .title { display:block; font-weight: 700; color: var(--good); margin-bottom: 4px; }
+
+  /* ---------- pipeline diagram ---------- */
+  .pipeline {
+    display: flex; align-items: stretch; gap: 0; margin: 20px 0; overflow-x: auto;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px;
+  }
+  .pipe-node {
+    flex: none; padding: 12px 16px; background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
+    white-space: nowrap;
+  }
+  .pipe-node .lbl { color: var(--text-3); font-size: 11px; letter-spacing: .04em; }
+  .pipe-node .val { font-weight: 700; color: var(--accent); }
+  .pipe-arrow {
+    flex: none; display: flex; align-items: center; padding: 0 10px;
+    color: var(--text-3); font-weight: 700;
+  }
+
+  /* ---------- footer ---------- */
+  footer {
+    border-top: 1px solid var(--border); margin-top: 40px; padding: 40px 24px 64px;
+    text-align: center; color: var(--text-3); font-size: 13.5px;
+  }
+  footer .foot-links { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 12px; }
+
+  @media print {
+    nav.toc, #progress { display: none; }
+    .layout { grid-template-columns: 1fr; }
+    body { background: #fff; color: #000; }
+  }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<header>
+  <div class="hero-inner">
+    <span class="kicker"><span class="dot"></span>技术分享 · MLA 改造实录</span>
+    <h1>在 nanoGPT 上把 MHA 换成 MLA</h1>
+    <p class="subtitle">核心理念、改动清单，和那些不报错的坑 —— 一次真实的改造记录：把 Karpathy 的 nanoGPT（标准 MHA）
+    换成 DeepSeek-V2 的 <strong>Multi-head Latent Attention（MLA）</strong>。</p>
+    <div class="meta">
+      <span class="tag">MLA · Multi-head Latent Attention</span>
+      <span class="tag">KV Cache</span>
+      <span class="tag">Decoupled RoPE</span>
+      <span class="tag">Absorption</span>
+      <span class="tag">nanoGPT</span>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" id="toc">
+    <p class="toc-title">目录</p>
+    <ul>
+      <li><a href="#sec-1">一、MLA 在解决什么问题</a></li>
+      <li>
+        <a href="#sec-2">二、MLA 的核心理念</a>
+        <ul>
+          <li><a href="#sec-2-1">2.1 解法谱系的位置</a></li>
+          <li><a href="#sec-2-2">2.2 压缩：缓存 latent</a></li>
+          <li><a href="#sec-2-3">2.3 吸收：永不解压</a></li>
+          <li><a href="#sec-2-4">2.4 解耦 RoPE</a></li>
+          <li><a href="#sec-2-5">2.5 缓存数学对比</a></li>
+        </ul>
+      </li>
+      <li><a href="#sec-3">三、具体改了哪些东西</a></li>
+      <li><a href="#sec-4">四、坑地图：五个静默陷阱</a></li>
+      <li><a href="#sec-5">五、RoPE 会杀死吸收</a></li>
+      <li><a href="#sec-6">六、v_head_dim 的两个坑</a></li>
+      <li><a href="#sec-7">七、等价性测试</a></li>
+      <li><a href="#sec-8">八、实测数字</a></li>
+      <li><a href="#sec-9">九、复盘：三件事</a></li>
+      <li><a href="#sec-ref">参考</a></li>
+    </ul>
+  </nav>
+
+  <article>
+
+    <!-- ===================== 一 ===================== -->
+    <section id="sec-1">
+      <h2><span class="sec-no">一</span>先说清楚：MLA 在解决什么问题</h2>
+
+      <h3><span class="sub-no">1.1</span>自回归解码在重复算历史</h3>
+      <p>大模型生成是<strong>一个 token 一个 token 吐</strong>的。要生成第 <code>t</code> 个 token，就得让它的 query 去和
+      第 <code>0..t-1</code> 个 token 的 key/value 算注意力。而历史 token 的 K/V <strong>只由已经确定的输入决定</strong>，
+      不会因为后面多了一个 token 而改变。</p>
+      <p>所以如果不缓存，每一步都要把整个前缀重新跑一遍：</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th></th><th>每步计算量</th><th>生成 T 个 token 总量</th></tr></thead>
+          <tbody>
+            <tr><td>无 cache</td><td>O(t²)</td><td><strong>O(T³)</strong></td></tr>
+            <tr><td>有 cache</td><td>O(t)</td><td><strong>O(T²)</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>缓存 K/V 就是拿一小块显存，换掉这个重复劳动——<strong>KV cache 本质上是记忆化（memoization）</strong>。</p>
+
+      <h3><span class="sub-no">1.2</span>KV cache 成了推理的主要开销</h3>
+      <p>标准 MHA 每 token 每层要缓存：</p>
+      <pre class="ascii">K 一份 + V 一份 = 2 × n_head × head_dim</pre>
+      <p>放到 DeepSeek-V2 的规模（<code>n_head=128, head_dim=128</code>），就是 <strong>32768 个数 / token / 层</strong>。
+      再乘上几十层、乘上几万 token 的上下文、乘上并发请求数——KV cache 会迅速超过模型权重本身，
+      成为「这张卡能同时服务多少个用户」的硬约束。</p>
+
+      <h3><span class="sub-no">1.3</span>更要命的是：decode 是带宽瓶颈</h3>
+      <p>decode 阶段每步只处理 1 个新 token，却必须把<strong>全部权重 + 整个 KV cache</strong> 从显存读一遍。
+      算术强度极低，算力单元大部分时间在等数据。</p>
+      <blockquote><p><strong>decode 阶段：省显存读取量 ≈ 省时间。</strong></p></blockquote>
+      <p>这句话是整个 MLA 设计的价值锚点。后面你会看到，MLA 的两个核心动作——压缩和吸收——
+      一个省容量，一个省带宽，都是冲着这一条去的。</p>
+    </section>
+
+    <!-- ===================== 二 ===================== -->
+    <section id="sec-2">
+      <h2><span class="sec-no">二</span>MLA 的核心理念（三个思想）</h2>
+
+      <h3 id="sec-2-1"><span class="sub-no">2.1</span>先看它在解法谱系里的位置</h3>
+      <p>所有方法都在回答同一个问题：<strong>能不能少存一点 K/V？</strong></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>方法</th><th>思路</th><th>每 token 每层缓存</th><th>代价</th></tr></thead>
+          <tbody>
+            <tr><td><strong>MHA</strong></td><td>每个 head 独立的 K/V</td><td><code>2·n_head·head_dim</code></td><td>基准</td></tr>
+            <tr><td><strong>MQA</strong></td><td>所有 head 共享一份 K/V</td><td><code>2·head_dim</code></td><td>压缩率高，质量损失明显</td></tr>
+            <tr><td><strong>GQA</strong></td><td>分成 g 组，组内共享</td><td><code>2·g·head_dim</code></td><td>MHA 与 MQA 的折中（Llama 用）</td></tr>
+            <tr><td><strong>MLA</strong></td><td>存<strong>低秩 latent</strong>，用时再升维</td><td><code>kv_lora_rank (+ rope 维)</code></td><td>压缩率高且质量损失小</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>关键区别一句话：</p>
+      <blockquote><p><strong>MQA/GQA 在 head 维度上做减法（砍 head 独立性）；MLA 在特征维度上做压缩（每个 head 的 K/V 被约束进低维子空间）。</strong></p></blockquote>
+      <p>保留 head 独立性是 MLA 质量更好的原因，也是它实现更复杂的原因——后面所有的「坑」都源于这个取舍。</p>
+
+      <h3 id="sec-2-2"><span class="sub-no">2.2</span>思想①：压缩——缓存 latent，而不是 K/V</h3>
+      <p>MLA 的数据流是这样的：</p>
+      <pre class="ascii">x ──W_DKV──> c_kv ──W_UK──> k
+  (n_embd)    (r)   ──W_UV──> v</pre>
+      <ul>
+        <li><code>c_kv</code> 是 <code>r</code> 维（低秩 rank，比如 128）；</li>
+        <li>完整的 K + V 是 <code>2·n_head·head_dim</code> 维（比如 768）；</li>
+        <li><code>W_UK</code>、<code>W_UV</code> 是<strong>固定权重</strong>，所以 K、V 是 <code>c_kv</code> 的<strong>确定性函数</strong>。</li>
+      </ul>
+      <p>存一个量和存它的函数值，信息量完全相同，但占用差好几倍。所以：</p>
+      <blockquote><p><strong>存上游那个窄的 <code>c_kv</code>，需要时再算下游的 K/V。这就是 MLA 的定义，不是实现技巧。</strong></p></blockquote>
+      <p>两个关键点：</p>
+      <ol>
+        <li><code>c_kv</code> 上要加一层 <strong>RMSNorm</strong>（<code>kv_norm</code>）。它是整条序列历史的信息瓶颈，尺度必须稳定，否则梯度会在下投影和上投影之间来回震荡。</li>
+        <li><strong>反过来想</strong>：如果你缓存的是解压后的 K/V，那 MLA 相对 MHA 就只剩「参数少一点」了——而参数少从来不是 MLA 的目的，低秩反而是它付出的代价。你会得到一个<strong>纯亏</strong>的架构。</li>
+      </ol>
+
+      <h3 id="sec-2-3"><span class="sub-no">2.3</span>思想②：吸收——为什么可以永不解压</h3>
+      <p>注意力分数是 <code>q·k</code>。把低秩结构代进去：</p>
+      <pre class="ascii">q_i · k_j = (W_UQ c_q_i)ᵀ (W_UK c_kv_j)
+          = c_q_iᵀ (W_UQᵀ W_UK) c_kv_j
+                    └──────┬──────┘
+                    固定矩阵，可离线预乘</pre>
+      <p>令 <code>W' = W_UQᵀ W_UK</code>，分数变成 <code>c_q_iᵀ W' c_kv_j</code>——<strong>直接在 latent 空间算完了，K 从头到尾没被造出来。</strong></p>
+      <p>value 侧同理：</p>
+      <pre class="ascii">y_i = Σ_j a_ij v_j = Σ_j a_ij (W_UV c_kv_j) = W_UV (Σ_j a_ij c_kv_j)</pre>
+      <p>先在 latent 空间加权求和，最后统一升维一次。</p>
+      <p>这就是<strong>吸收（absorption）</strong>：把 <code>W_UK</code> 折进 Q、把 <code>W_UV</code> 折到输出之后。解码时每个历史 token
+      只读 <code>r</code> 个数、只在 <code>r</code> 维里算，永远不解压。<strong>省的不只是容量，更是带宽</strong>——正是 1.3 节说的关键。</p>
+      <p>代价要讲清楚：吸收后单次点积的维度从 <code>nope</code>（比如 48）变成 <code>r</code>（128），<strong>单次点积反而更贵</strong>。
+      它划算是因为省掉了 <code>O(T_kv·r·nope)</code> 的解压矩阵乘——序列越长越划算。</p>
+
+      <h3 id="sec-2-4"><span class="sub-no">2.4</span>思想③：解耦 RoPE——调和①和②的冲突</h3>
+      <p><strong>RoPE 会把吸收打死。</strong> 位置 m 的 q 乘 <code>R_m</code>，位置 n 的 k 乘 <code>R_n</code>：</p>
+      <pre class="ascii">q_i · k_j = c_q_iᵀ W_UQᵀ (R_mᵀ R_n) W_UK c_kv_j
+          = c_q_iᵀ W_UQᵀ  R_{n-m}   W_UK c_kv_j
+                          └───┬───┘
+                     依赖相对距离，卡在中间合并不掉</pre>
+      <p>中间那个旋转矩阵依赖相对距离，不能预计算——吸收失效。</p>
+      <p><strong>DeepSeek 的解法：让一部分维度负责位置，另一部分负责内容。</strong></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th></th><th>维度（V2）</th><th>来源</th><th>能否吸收</th></tr></thead>
+          <tbody>
+            <tr><td><strong>nope 部分</strong></td><td>128</td><td><code>W_UK · c_kv</code>（从 latent 升维）</td><td>✅</td></tr>
+            <tr><td><strong>rope 部分</strong></td><td>64</td><td><code>RoPE(W_KR · x)</code>，直接从 x 投影</td><td>❌，但很小</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>三个关键细节：</p>
+      <ol>
+        <li><code>k_R</code> <strong>不从 <code>c_kv</code> 出</strong>，而是由独立的 <code>W_KR</code> 从 <code>x</code> 投影；</li>
+        <li><code>k_R</code> 是<strong>所有 head 共享的单个 head</strong>（一份 64 维，不是 n_head 份）；</li>
+        <li><code>k_R</code> 和 <code>c_kv</code> <strong>一起被缓存</strong>。</li>
+      </ol>
+      <p>最终分数 = <code>q_nope·k_nope</code>（吸收，latent 空间）+ <code>q_rope·k_rope</code>（很小，直接算）。</p>
+      <blockquote><p><strong>判断信号</strong>：当论文里出现一个看起来「多余的复杂性」——「为什么不直接从 <code>c_kv</code> 里切一段做 rope？那多简单」——
+      <strong>那个复杂性通常就是整篇论文的关键。</strong> 作者能简化早就简化了。看到一个可简化的设计，先假设自己没理解，而不是假设作者啰嗦。</p></blockquote>
+
+      <h3 id="sec-2-5"><span class="sub-no">2.5</span>缓存数学对比</h3>
+      <pre class="ascii">MHA :  2 × n_head × head_dim             = 2 × 128 × 128 = 32768 个数 / token / 层
+MLA :  kv_lora_rank + qk_rope_head_dim   =      512 +  64 =   576 个数 / token / 层
+                                                            ≈ 56.9× 更小</pre>
+      <p>head 数越多、head_dim 越大，MLA 的相对收益越大——这是它在大模型上才真正发力的原因。</p>
+    </section>
+
+    <!-- ===================== 三 ===================== -->
+    <section id="sec-3">
+      <h2><span class="sec-no">三</span>从 MHA 到 MLA：具体改了哪些东西</h2>
+      <p>以 <code>model.py</code>（vanilla nanoGPT）为对照，<code>model_mla.py</code> 动了这些地方：</p>
+
+      <h3><span class="sub-no">3.1</span>权重布局：从融合投影到低秩三件套</h3>
+      <p>MHA 版（融合 <code>c_attn</code>）→ MLA 版拆成：</p>
+      <pre class="code"><code class="py">if self.kv_lora_rank > 0:
+    self.wkv_a  = nn.Linear(n_embd, kv_lora_rank, bias=False)      # W_DKV：下投影
+    self.kv_norm = RMSNorm(kv_lora_rank)                            # latent 上的 norm
+    self.wk_b   = nn.Linear(kv_lora_rank, H * dn, bias=False)       # W_UK：升维到 nope 部分
+    self.wv_b   = nn.Linear(kv_lora_rank, H * dv, bias=False)       # W_UV：升维到 value
+    if self.decoupled_rope:
+        self.wkr = nn.Linear(n_embd, qk_rope_head_dim, bias=False)  # W_KR：单头，共享
+else:
+    self.wk = nn.Linear(n_embd, H * d, bias=config.bias)            # ← fallback 必须保留
+    self.wv = nn.Linear(n_embd, H * dv, bias=config.bias)</code></pre>
+      <p>Q 侧也可选低秩（<code>q_lora_rank > 0</code>），走 <code>wq_a + q_norm + wq_b</code>。</p>
+
+      <h3><span class="sub-no">3.2</span>位置编码：学习式 wpe → RoPE</h3>
+      <ul>
+        <li><code>use_rope=False</code> 时保留学习式 <code>wpe</code>（原 nanoGPT 路径）；</li>
+        <li><code>use_rope=True</code> 时换成旋转位置编码，并支持 DeepSeek 的<strong>解耦 RoPE</strong>（<code>qk_rope_head_dim > 0</code>）。</li>
+      </ul>
+
+      <h3><span class="sub-no">3.3</span>v_head_dim 独立</h3>
+      <p>普通 MHA 里 q/k/v 每头维度相同，是「由 <code>n_embd / n_head</code> 切出来」的<strong>结果</strong>，不是数学要求。
+      真正的约束只有 <code>dim(q) == dim(k)</code>；<code>dim(v)</code> 完全自由。DeepSeek 选
+      <code>qk = 128 nope + 64 rope = 192</code>、<code>v_head_dim = 128</code>——那 64 维 rope 只用于打分，value 侧没必要跟着变宽。</p>
+
+      <h3><span class="sub-no">3.4</span>forward 签名：从纯函数到有状态</h3>
+      <pre class="code"><code class="py"># 原来：def forward(self, x):
+# 现在：def forward(self, x, freqs_cis=None, start_pos=0, use_cache=False):</code></pre>
+      <ul>
+        <li><code>start_pos</code>：解码时模块只收到 <code>(B,1,C)</code>，无法判断这是第 1 个还是第 500 个 token；</li>
+        <li><code>use_cache</code>：训练 / 推理两条路的分岔口。</li>
+      </ul>
+
+      <h3><span class="sub-no">3.5</span>generate：变成 prefill + decode 两阶段</h3>
+      <pre class="code"><code class="py">self.reset_cache()      # 上次生成的残留会被当成历史读进来
+pos, cur = 0, idx
+for _ in range(max_new_tokens):
+    logits, _ = self(cur, start_pos=pos, use_cache=True)
+    pos += cur.size(1)  # 第一次是 prefill（整个 prompt），之后每次 1 个 token
+    cur = self._sample(logits, temperature, top_k)
+    idx = torch.cat((idx, cur), dim=1)</code></pre>
+    </section>
+
+    <!-- ===================== 四 ===================== -->
+    <section id="sec-4">
+      <h2><span class="sec-no">四</span>坑地图：五个静默陷阱</h2>
+      <p>这四个（外加一个）坑有一个共同点，也正是 MLA 改造最危险的地方：<strong>没有一个会抛异常</strong>。
+      它们只会让生成质量变差，而「生成得不好」在小模型上太容易被归因成「模型太小 / 训得不够」。</p>
+
+      <div class="pitfall">
+        <div class="pit-head"><span class="pit-badge">1</span><h4>RoPE 位置错位（静默）</h4></div>
+        <p>RoPE 存的是<strong>绝对位置</strong>，靠点积产生相对行为。没有 cache 时 <code>freqs[:T]</code> 恰好对，因为输入总从 0 开始。</p>
+        <p>有了 cache，你喂进来的那个 token 真实位置可能是 500。如果你还写 <code>freqs[:1]</code>，就等于告诉模型它在位置 0。</p>
+        <p><strong>表现</strong>：生成开头正常（prefill 是对的），然后漂移、开始重复。</p>
+        <p><strong>修法</strong>——注意 query 和 key 需要<strong>不同的切片</strong>：</p>
+        <pre class="code"><code class="py">q_freqs = freqs[start_pos : start_pos + T]   # 新 token 的真实位置
+k_freqs = freqs[: start_pos + T]             # 整段历史</code></pre>
+      </div>
+
+      <div class="pitfall">
+        <div class="pit-head"><span class="pit-badge">2</span><h4>因果 mask（静默，且最阴险）</h4></div>
+        <p>PyTorch 的 <code>scaled_dot_product_attention(..., is_causal=True)</code> 会把三角 mask 对齐到<strong>左上角</strong>：query 第 i 行只能看 key 第 0..i 列。</p>
+        <ul>
+          <li>训练时 <code>q_len == k_len</code>，左上角对齐 = 对角线对齐，<strong>正确</strong>；</li>
+          <li>decode 时 <code>q_len=1</code>、<code>k_len=501</code>，你的单个 query 只能看到 key 第 0 列——<strong>整段历史被静默屏蔽</strong>。</li>
+        </ul>
+        <p><strong>修法</strong>：别把 <code>is_causal</code> 当常数：</p>
+        <pre class="code"><code class="py">if T_kv == T and start_pos == 0:  return None, True    # 训练 / prefill
+if T == 1:                        return None, False   # decode：看全部历史
+# 分块 prefill 需要显式偏移 mask
+q_pos = torch.arange(start_pos, start_pos + T).unsqueeze(1)
+k_pos = torch.arange(0, T_kv).unsqueeze(0)
+return (q_pos >= k_pos), False</code></pre>
+        <p>别忘手写 attention 的 fallback 分支——<code>self.bias[:, :, :T, :T]</code> 带着同样的假设，而 CPU 上你跑的就是这条分支。</p>
+      </div>
+
+      <div class="pitfall">
+        <div class="pit-head"><span class="pit-badge">3</span><h4>两次生成之间 cache 残留（静默）</h4></div>
+        <p>状态意味着残留。如果采样脚本循环画 N 条样本，第 1 条是干净的，之后每条都会继承上一条的历史。</p>
+        <p><strong>修法</strong>：在 <code>generate()</code> 入口处 <code>reset_cache()</code>，不要指望调用方记得。</p>
+      </div>
+
+      <div class="pitfall">
+        <div class="pit-head"><span class="pit-badge">4</span><h4>忘了 model.eval()（静默，且被放大）</h4></div>
+        <p>没有 cache 时，留着 dropout 顶多让生成带点噪声。有了 cache，<strong>被 dropout 污染的 latent 会被写进 cache</strong>，
+        毒害后面每一个 token。cache 不只暴露了这个 bug，还把它<strong>持久化</strong>了。</p>
+      </div>
+
+      <div class="pitfall">
+        <div class="pit-head"><span class="pit-badge">5</span><h4>跑过 block_size（这个是「响」的，故意让它响）</h4></div>
+        <p>原版 nanoGPT 用滑动窗口 <code>idx[:, -block_size:]</code> 处理超长。带 cache 后这件事真变复杂了（滚动 buffer + 重算位置）。</p>
+        <p><strong>建议的修法是：拒绝。</strong></p>
+        <pre class="code"><code class="py">assert idx.size(1) + max_new_tokens <= self.config.block_size, \
+    "cached generation needs prompt+new <= block_size; use_cache=False for the sliding-window path"</code></pre>
+        <p>主动划边界，比假装支持一个你没实现的东西强。这是五个坑里唯一一个我<strong>故意让它报错</strong>的。</p>
+      </div>
+    </section>
+
+    <!-- ===================== 五 ===================== -->
+    <section id="sec-5">
+      <h2><span class="sec-no">五</span>最隐蔽的一个坑：RoPE 会杀死 MLA 最好的部分</h2>
+      <p>这个坑值得单独一节，因为它是「读错论文」而不是「读错 API」，而且它背后的设计很漂亮。</p>
+      <p>MLA 真正的超能力不只是 cache 小，而是<strong>你根本不用解压</strong>。但 2.4 节算过：RoPE 的旋转矩阵卡在
+      <code>W_UQᵀ</code> 和 <code>W_UK</code> 中间，依赖相对距离，合并不掉，吸收失效。</p>
+      <p>DeepSeek 的答案是<strong>切头</strong>：大部分维度不旋转、可吸收；一小部分携带位置，并且<strong>用独立的 <code>W_KR</code> 从 x 投影</strong>、
+      作为单头共享、和 latent 一起缓存。</p>
+      <p>我第一次实现只做了「一部分维度旋转、一部分不旋转」的<strong>表象</strong>，但 rope 部分是从解压后的 K 里切的。
+      结果：缓存 <code>c_kv</code> 仍然合法（省容量还在），但<strong>吸收彻底做不了</strong>（省带宽没了）。我抄了答案的形状，没抄到机制。</p>
+      <p>更糟的是，我当时的默认配置把<strong>整个 head 都旋转了</strong>，nope 部分 = 0，吸收维度 = 0——我实现的解耦 RoPE，解耦度设成了零。</p>
+      <blockquote><p><strong>教训</strong>：当论文里有一个看起来可以简化的步骤，那个步骤往往就是全部要点。</p></blockquote>
+    </section>
+
+    <!-- ===================== 六 ===================== -->
+    <section id="sec-6">
+      <h2><span class="sec-no">六</span>v_head_dim 解耦的两个坑（一个报错，一个不报）</h2>
+      <p>让 <code>v_head_dim != head_dim</code> 时有两个必踩点：</p>
+      <div class="pitfall">
+        <div class="pit-head"><span class="pit-badge">1</span><h4>最后的 reshape 会炸（立刻报错）</h4></div>
+        <p><code>view(B, T, C)</code> 隐含假设 <code>n_head*head_dim == n_embd</code>。要改成
+        <code>view(B, T, self.n_head * self.v_head_dim)</code>。<strong>好消息：这个坑会立刻报错。</strong></p>
+      </div>
+      <div class="pitfall">
+        <div class="pit-head"><span class="pit-badge">2</span><h4>softmax scale 用错了维度（不报错）</h4></div>
+        <p><strong>softmax scale 必须用 q/k 维，不是 v 维。</strong> 走 SDPA 时默认 scale 取 <code>query.size(-1)</code>，<strong>自动正确</strong>；
+        手写路径必须自己写 <code>1/sqrt(head_dim)</code>。<strong>这个坑不报错。</strong></p>
+      </div>
+    </section>
+
+    <!-- ===================== 七 ===================== -->
+    <section id="sec-7">
+      <h2><span class="sec-no">七</span>怎么证明自己没写错：等价性测试</h2>
+      <p>上面的坑 99% 是<strong>静默</strong>的。如果唯一验证手段是「跑一下看看像不像样」，你一个都抓不到。
+      而「跑一下看看」正是最容易犯的错。</p>
+      <p>这里引入一把尺子，把改动分三类：</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>类别</th><th>定义</th><th>例子</th><th>验收方式</th></tr></thead>
+          <tbody>
+            <tr><td><strong>① 改变模型</strong></td><td><code>f' ≠ f</code></td><td>MHA→MLA、改 RoPE 布局、改 v_head_dim</td><td>重训 + 比 val loss</td></tr>
+            <tr><td><strong>② 恒等变换</strong></td><td><code>f' = f</code>，只是更快/更省</td><td>KV cache、吸收、FlashAttention</td><td><strong>等价性断言</strong></td></tr>
+            <tr><td><strong>③ 近似</strong></td><td><code>f' ≈ f</code></td><td>量化、滑动窗口、剪枝</td><td>断言 + 误差上界</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>KV cache 和吸收都是类别②</strong>——它们是记忆化，数学上必须和慢路径逐位相同。所以正确的验证方式不是重训，而是断言：</p>
+      <pre class="code"><code class="py">a = model.generate(prompt, N, temperature=0.0, use_cache=False)  # 慢参考
+b = model.generate(prompt, N, temperature=0.0, use_cache=True)   # 快路径
+assert torch.equal(a, b)</code></pre>
+      <p>两个不可妥协的细节：</p>
+      <ul>
+        <li><strong>必须贪心（<code>temperature=0.0</code>）</strong>：采样有随机性，两条路会因 RNG 状态不同而分叉，测试就没意义。</li>
+        <li><strong>必须 <code>model.eval()</code></strong>：否则 dropout 让两条路必然不同，你会得到一个永远失败的测试。</li>
+      </ul>
+      <p><code>test_mla.py</code> 里落地了五组断言，覆盖 7 种配置：</p>
+      <pre class="ascii">1. 有 cache 的生成 == 无 cache 的生成          (贪心，逐 token 相等)
+2. 吸收路径      == 朴素路径                    (W_UK 折进 Q，W_UV 折到输出后)
+3. 分两块 prefill == 一次 prefill               (验证偏移 mask)
+4. 连续两次 generate == 第二次单独跑             (验证 cache 重置)
+5. 改动未来 token 不影响过去位置的 logits        (因果性没被 cache 破坏)</pre>
+      <p>这五条断言，把坑 1~5 全部收敛成一个布尔值。位置错了？失败。mask 错了？失败。cache 残留？失败。dropout 没关？立刻失败。</p>
+      <blockquote><p><strong>规则</strong>：凡是声称「只是优化」的改动，都必须能写出一条等价性断言。写不出来，说明它其实改变了模型，你只是还没意识到。</p></blockquote>
+    </section>
+
+    <!-- ===================== 八 ===================== -->
+    <section id="sec-8">
+      <h2><span class="sec-no">八</span>实测数字</h2>
+      <p>小模型、CPU，只比同硬件下的相对差异。</p>
+
+      <h3><span class="sub-no">8.1</span>训练质量</h3>
+      <p>（<code>shakespeare_char</code>，6 层，<code>kv_lora_rank=128</code>，5000 步）：</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th></th><th>baseline (MHA)</th><th>MLA</th></tr></thead>
+          <tbody>
+            <tr><td>参数量</td><td>10.65 M</td><td><strong>9.76 M</strong>（−8.4%）</td></tr>
+            <tr><td>best val loss</td><td><strong>1.4716</strong></td><td>1.4757（+0.004）</td></tr>
+            <tr><td>final val loss</td><td>1.7127</td><td><strong>1.6636</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>参数更少、质量持平、过拟合更轻——低秩瓶颈在小数据集上起到了正则化作用。</p>
+
+      <h3><span class="sub-no">8.2</span>推理成本</h3>
+      <p>（先断言 <code>cached == uncached</code> 再测）：</p>
+      <pre class="ascii">KV cache:       768 → 864 numbers/token        (5.33× 更小)
+decode 400 tok: 4498 ms → 894 ms (naive) → 730 ms (absorbed)
+                                  5.03×            6.16×</pre>
+      <p>三点读法：</p>
+      <ol>
+        <li><strong>cache 是 MLA 收益的全部载体</strong>——没有 cache，MLA 相对 MHA 的推理优势严格为 0，甚至略慢。</li>
+        <li><strong>解耦用 12% 的额外 cache 换来了吸收路径</strong>，吸收在朴素 cache 上再快 1.22×。</li>
+        <li><strong>本仓库的 6× 不是 DeepSeek 的 57×</strong>。比例是配置的函数，不是技术的函数。自己模型上自己测。</li>
+      </ol>
+    </section>
+
+    <!-- ===================== 九 ===================== -->
+    <section id="sec-9">
+      <h2><span class="sec-no">九</span>复盘：这次改造教会我的三件事</h2>
+      <ol>
+        <li><strong>从一开始就写 <code>forward(x, start_pos, use_cache)</code></strong>，哪怕两个参数几个月没人用。事后给无状态函数补状态，要改遍 <code>Block</code> / <code>GPT</code> / <code>generate</code> / 采样脚本整条调用链。</li>
+        <li><strong>先写等价性测试，再写它要验证的优化</strong>。写断言的过程会逼你说清「两条路为什么该一样」，而正是在这里你会发现你其实还没搞懂状态机。</li>
+        <li><strong>保留 fallback 开关</strong>：<code>kv_lora_rank=0</code> → 退回 MHA，<code>use_rope=False</code> → 退回学习式 wpe。<strong>删掉旧路径，就等于删掉了你的对照组。</strong></li>
+      </ol>
+      <p>最后是一把总尺子：</p>
+      <blockquote>
+        <p>每加一个东西，先问：<strong>它改变模型，还是只改变计算方式？</strong></p>
+        <p>改变模型 → 重训，并提前想清楚对齐哪根轴。<br>
+        只改变计算方式 → 断言它和慢路径相等，永远不要「跑一下看看」。</p>
+      </blockquote>
+    </section>
+
+    <!-- ===================== 参考 ===================== -->
+    <section id="sec-ref">
+      <h2><span class="sec-no">参</span>参考</h2>
+      <ul>
+        <li>Liu et al., <em>DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model</em> — <a href="https://arxiv.org/abs/2405.04434">arXiv:2405.04434</a>。§2.1 就是 MLA，含 decoupled RoPE 的推导。</li>
+        <li>DeepSeek-AI, <em>DeepSeek-V3 Technical Report</em> — <a href="https://arxiv.org/abs/2412.19437">arXiv:2412.19437</a></li>
+        <li>Shazeer, <em>Fast Transformer Decoding: One Write-Head is All You Need</em>（MQA）— <a href="https://arxiv.org/abs/1911.02150">arXiv:1911.02150</a></li>
+        <li>Ainslie et al., <em>GQA: Training Generalized Multi-Query Transformer Models</em> — <a href="https://arxiv.org/abs/2305.13245">arXiv:2305.13245</a></li>
+        <li>Dao et al., <em>FlashAttention</em> — <a href="https://arxiv.org/abs/2205.14135">arXiv:2205.14135</a></li>
+        <li>Karpathy, <em>nanoGPT</em> — <a href="https://github.com/karpathy/nanoGPT">github.com/karpathy/nanoGPT</a></li>
+      </ul>
+    </section>
+
+  </article>
+</div>
+
+<footer>
+  <div class="foot-links">
+    <a href="../model_mla.py">model_mla.py</a>
+    <a href="../mla_min.py">mla_min.py</a>
+    <a href="../test_mla.py">test_mla.py</a>
+    <a href="../bench_kv_cache.py">bench_kv_cache.py</a>
+  </div>
+  <p>在 nanoGPT 上把 MHA 换成 MLA · 技术分享帖 · 2026</p>
+</footer>
+
+<script>
+  // ---- scroll progress + active TOC ----
+  (function () {
+    var bar = document.getElementById('progress');
+    var links = [].slice.call(document.querySelectorAll('nav.toc a[href^="#"]'));
+    var map = {};
+    links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+
+    function onScroll() {
+      var h = document.documentElement;
+      var max = h.scrollHeight - h.clientHeight;
+      var y = h.scrollTop || document.body.scrollTop;
+      if (bar) bar.style.width = (max > 0 ? (y / max) * 100 : 0) + '%';
+
+      var current = null;
+      links.forEach(function (a) {
+        var id = a.getAttribute('href').slice(1);
+        var el = document.getElementById(id);
+        if (el && el.getBoundingClientRect().top <= 120) current = id;
+      });
+      links.forEach(function (a) {
+        a.classList.toggle('active', a.getAttribute('href').slice(1) === current);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+
+  // ---- tiny Python syntax highlighter (comments / strings / keywords) ----
+  (function () {
+    var KW = /\b(if|elif|else|for|while|in|return|assert|self|def|class|None|True|False|import|not|and|or)\b/g;
+    function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function highlight(el) {
+      var src = el.textContent;
+      var out = esc(src).split('\n').map(function (line) {
+        if (/^\s*#/.test(line)) {
+          return line.replace(/^(\s*)(.*)$/, '$1<span class="tk-c">$2</span>');
+        }
+        var idx = -1;
+        for (var i = 0; i < line.length; i++) {
+          if (line[i] === '#' && (i === 0 || /\s/.test(line[i - 1]))) { idx = i; break; }
+        }
+        var codePart = idx > -1 ? line.slice(0, idx) : line;
+        var comPart = idx > -1 ? line.slice(idx) : '';
+        codePart = codePart.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, '<span class="tk-s">$1</span>');
+        codePart = codePart.replace(KW, '<span class="tk-k">$1</span>');
+        return codePart + (idx > -1 ? '<span class="tk-c">' + comPart + '</span>' : '');
+      }).join('\n');
+      el.innerHTML = out;
+    }
+    [].slice.call(document.querySelectorAll('pre.code code.py')).forEach(highlight);
+  })();
+</script>
+</body>
+</html>
